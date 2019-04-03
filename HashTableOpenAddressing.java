@@ -1,10 +1,6 @@
 import java.util.Iterator;
 import java.util.NoSuchElementException;
 
-import com.sun.javafx.css.StyleCacheEntry.Key;
-
-import HashTableOpenAddressing.TableEntry;
-
 public class HashTableOpenAddressing<K, V> implements DictionaryInterface<K, V> {
 	private int numEntries;
 	private static final int DEFAULT_CAPACITY = 5;
@@ -48,21 +44,36 @@ public class HashTableOpenAddressing<K, V> implements DictionaryInterface<K, V> 
 	@Override
 	public V add(K keyIn, V valueIn) 
 	{
-		TableEntry temp = new TableEntry(keyIn, valueIn);
-		
+		if(valueIn == null  || keyIn == null)
+		{
+			throw new IllegalArgumentException();
+		}
+
+		V oldValue = getValue(keyIn);
+
 		int index = getHashIndex(keyIn);
-		
-		if(table[index] != null)
+		index = quadraticProbe(index, keyIn);
+
+		TableEntry<K, V> temp = new TableEntry<>(keyIn, valueIn);
+		V returnValue = oldValue;
+
+		if(table[index] == null || table[index].state == HashTableOpenAddressing.TableEntry.States.REMOVED)
 		{
 			table[index] = temp;
-			
-			return valueIn;
+			++numEntries;
+			returnValue = null;
 		}
- 		else 
- 		{
- 			table[index] = temp;
- 			return null;
- 		}
+		else
+		{
+			table[index] = temp;
+		}
+
+		if(numEntries > loadFactor * table.length)
+		{
+			enlargeHashTable();
+		}
+
+		return returnValue;
 	}
 
 	private int linearProbe(int index, K keyIn) {
@@ -96,16 +107,50 @@ public class HashTableOpenAddressing<K, V> implements DictionaryInterface<K, V> 
 		}
 	}
 
-	private int quadraticProbe(int index, K key) {
-		// TODO
-		return -1;
+	private int quadraticProbe(int index, K key) 
+	{
+		boolean found = false;
+		int removedStateIndex = -1; // Index of first removed location
+		
+		int increment = 0;
+		
+		if(table[index] == null){ 
+			return index;
+		}
+		while (!found && table[index] != null) {	
+			if (table[index].isIn()) {
+				if (key.equals(table[index].getKey())) 
+				{
+					found = true; 		// Key found
+				}
+				else
+				{            		// Follow probe sequence
+					index = (int) ((index + (increment * increment)) % table.length);  
+				}
+				
+				++increment;
+			}
+			else { 						// Skip entries that were removed
+				// Save index of first location in removed state
+				if (removedStateIndex == -1) {
+					removedStateIndex = index;
+				}
+				index = (index + 1) % table.length;          
+			} 
+		} 
+		if (found || (removedStateIndex == -1) ) {
+			return index;                  // Index of either key or null
+		}
+		else {
+			return removedStateIndex;      // Index of an available location
+		}
 	}
 
 	private int getHashIndex(K key)	
 	{
-		
+
 		int hashIndex = Math.abs(key.hashCode() % 10) % table.length;
-		
+
 		return hashIndex;
 	}
 
@@ -117,7 +162,7 @@ public class HashTableOpenAddressing<K, V> implements DictionaryInterface<K, V> 
 	public V remove(K key) {
 		V removedValue = null;
 		int index = getHashIndex(key);
-		index = linearProbe(index, key);
+		index = quadraticProbe(index, key);
 		//		index = quadraticProbe(index, key);
 
 		if (index != -1){
@@ -135,9 +180,21 @@ public class HashTableOpenAddressing<K, V> implements DictionaryInterface<K, V> 
 	 *  @return either the value that is associated with the search key 
 	 *          or null if no such object exists */
 	@Override
-	public V getValue(K key) {
-		// TODO 
-		return null;
+	public V getValue(K key) 
+	{
+		
+		int index = getHashIndex(key);
+		
+		TableEntry<K, V> item = table[index];
+		
+		if((item != null) && item.isIn())
+		{
+			return item.getValue();
+		}
+		else
+		{
+			return null;
+		}
 	}
 
 	/** Task: Sees whether a specific entry is in the dictionary.
@@ -207,7 +264,7 @@ public class HashTableOpenAddressing<K, V> implements DictionaryInterface<K, V> 
 		{
 			table[i] = null;
 		}
-		
+
 		numEntries = 0;
 	}
 
@@ -324,20 +381,50 @@ public class HashTableOpenAddressing<K, V> implements DictionaryInterface<K, V> 
 	}  
 
 	//****************************ValueIterator**************************
-	private class ValueIterator implements Iterator<V> {
+	private class ValueIterator implements Iterator<V> 
+	{
+		private int currentIndex;
+		private int numberLeft;
+		
+		private ValueIterator()
+		{
+			currentIndex = 0;
+			numberLeft = numEntries;
+		} 
 
 		@Override
-		public boolean hasNext() {
-			// TODO Auto-generated method stub
+		public boolean hasNext() 
+		{
+			if(numberLeft > 0)
+			{
+				return true;
+			}
 			return false;
 		}
 
 		@Override
-		public V next() {
-			// TODO Auto-generated method stub
-			return null;
+		public V next() 
+		{
+			V result = null;
+
+			if(hasNext())
+			{
+				while((table[currentIndex] == null) || table[currentIndex].isRemoved())
+				{
+					currentIndex++;
+				}
+
+				result = table[currentIndex].getValue();
+				numberLeft--;
+				currentIndex++;
+			}
+			else
+			{
+				throw new NoSuchElementException();
+			}
+
+			return result;
 		}
-		// TODO
 	} 
 
 	//****************************TableEntry**************************
@@ -390,9 +477,9 @@ public class HashTableOpenAddressing<K, V> implements DictionaryInterface<K, V> 
 		private void setToRemoved()	
 		{
 			// Entry not in use, deleted from table
-			
+
 			state = States.REMOVED;
-			
+
 		}
 
 		public String toString() {
